@@ -3,9 +3,10 @@ local runService = game:GetService("RunService")
 
 -- إعدادات السكربت
 local autoStealEnabled = false
-local mapRestockTime = 60 -- الوقت الافتراضي للرسباون
-local timeRemaining = 60  -- سيبدأ العد فوراً من 60
+local learnedRestockTime = 0 
+local timeRemaining = 0
 local lastRestockTick = tick()
+local lastEggCount = 0
 
 local targetRarities = {
     {name = "divine", value = 3},
@@ -39,20 +40,21 @@ Title.Font = Enum.Font.SourceSansBold
 Title.Parent = MainFrame
 
 local TimerLabel = Instance.new("TextLabel")
-TimerLabel.Size = UDim2.new(1, -20, 0, 30)
-TimerLabel.Position = UDim2.new(0, 10, 0, 50)
+TimerLabel.Size = UDim2.new(1, -10, 0, 30)
+TimerLabel.Position = UDim2.new(0, 5, 0, 50)
 TimerLabel.BackgroundTransparency = 1
-TimerLabel.Text = "Map Timer: 60s"
+TimerLabel.Text = "Waiting for 1st Restock..."
 TimerLabel.TextColor3 = Color3.fromRGB(255, 200, 50)
 TimerLabel.TextSize = 16
 TimerLabel.Font = Enum.Font.SourceSansBold
+TimerLabel.TextScaled = true
 TimerLabel.Parent = MainFrame
 
 local StatusLabel = Instance.new("TextLabel")
 StatusLabel.Size = UDim2.new(1, -20, 0, 30)
 StatusLabel.Position = UDim2.new(0, 10, 0, 85)
 StatusLabel.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-StatusLabel.Text = "Active..."
+StatusLabel.Text = "Scanning Map..."
 StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 StatusLabel.TextSize = 16
 StatusLabel.Font = Enum.Font.SourceSansSemibold
@@ -69,7 +71,7 @@ ToggleBtn.Font = Enum.Font.SourceSansBold
 ToggleBtn.Parent = MainFrame
 
 -- ==========================================
--- 2. دوال الفحص والسرقة
+-- 2. نظام الفحص والسرقة الذكي
 -- ==========================================
 local function teleportAndSteal(targetEgg)
     local rootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
@@ -83,30 +85,6 @@ local function teleportAndSteal(targetEgg)
     end
 end
 
-local function checkAndSnipe(obj)
-    if not autoStealEnabled then return end
-    if not (obj:IsA("BasePart") or obj:IsA("Model")) then return end
-    
-    local eggName = string.lower(obj.Name)
-    local isRare = false
-    
-    for _, rarity in ipairs(targetRarities) do
-        if string.find(eggName, rarity.name) then
-            isRare = true
-            break
-        end
-    end
-    
-    if isRare then
-        StatusLabel.Text = "Sniping: " .. obj.Name
-        StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
-        teleportAndSteal(obj:IsA("Model") and obj.PrimaryPart or obj)
-    end
-end
-
--- ==========================================
--- 3. نظام التوقيت المتزامن (Auto-Sync)
--- ==========================================
 ToggleBtn.MouseButton1Click:Connect(function()
     autoStealEnabled = not autoStealEnabled
     if autoStealEnabled then
@@ -115,39 +93,68 @@ ToggleBtn.MouseButton1Click:Connect(function()
     else
         ToggleBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
         ToggleBtn.Text = "Snipe on Restock: OFF"
-        StatusLabel.Text = "Active..."
-        StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
     end
 end)
 
--- مراقبة الماب فوراً بدون لوب ثقيل
-workspace.DescendantAdded:Connect(function(obj)
-    task.wait(0.1) -- انتظار تحميل المجسم
-    local objName = string.lower(obj.Name)
-    
-    -- إذا ظهرت بيضة جديدة، نقوم بتحديث المؤقت
-    if string.find(objName, "egg") or obj:FindFirstChild("TouchInterest") then
-        local newInterval = math.floor(tick() - lastRestockTick)
-        if newInterval > 10 then 
-            mapRestockTime = newInterval
-        end
-        
-        lastRestockTick = tick()
-        timeRemaining = mapRestockTime
-        StatusLabel.Text = "Restock Detected!"
-        
-        checkAndSnipe(obj)
-    end
-end)
-
--- تشغيل المؤقت الظاهر على الشاشة
+-- حلقة تعمل كل ثانية لفحص الماب بالكامل
 task.spawn(function()
     while task.wait(1) do
-        if timeRemaining > 0 then
-            timeRemaining = timeRemaining - 1
-            TimerLabel.Text = "Map Timer: " .. timeRemaining .. "s"
+        local currentEggs = 0
+        local raresFound = {}
+        
+        -- فحص جميع المجسمات مرة واحدة فقط لتجنب اللاق
+        for _, obj in pairs(workspace:GetDescendants()) do
+            if obj:IsA("BasePart") and obj:FindFirstChild("TouchInterest") then
+                currentEggs = currentEggs + 1
+                
+                if autoStealEnabled then
+                    local name = string.lower(obj.Name)
+                    for _, rarity in ipairs(targetRarities) do
+                        if string.find(name, rarity.name) then
+                            table.insert(raresFound, {inst = obj, val = rarity.value})
+                            break
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- إذا وجد بيض نادر، يسرقه فوراً (يرتب من الأغلى للأرخص)
+        if #raresFound > 0 and autoStealEnabled then
+            table.sort(raresFound, function(a, b) return a.val > b.val end)
+            StatusLabel.Text = "Sniping Rare Egg!"
+            StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
+            for _, rare in ipairs(raresFound) do
+                teleportAndSteal(rare.inst)
+            end
         else
-            TimerLabel.Text = "Map Timer: 0s (Waiting...)"
+            StatusLabel.Text = "Scanning Map..."
+            StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        end
+        
+        -- اكتشاف الريستوك الحقيقي (إذا زاد عدد البيض فجأة بأكثر من 10 بيضات)
+        if currentEggs >= lastEggCount + 10 then
+            local interval = math.floor(tick() - lastRestockTick)
+            
+            -- حفظ الوقت الدقيق للماب (نتجاهل الأوقات القصيرة جداً لمنع الأخطاء)
+            if interval > 20 then
+                learnedRestockTime = interval
+            end
+            
+            lastRestockTick = tick()
+            timeRemaining = learnedRestockTime
+        end
+        
+        lastEggCount = currentEggs
+        
+        -- عرض المؤقت
+        if learnedRestockTime > 0 then
+            if timeRemaining > 0 then
+                timeRemaining = timeRemaining - 1
+                TimerLabel.Text = "Map Timer: " .. timeRemaining .. "s"
+            else
+                TimerLabel.Text = "Map Timer: 0s (Waiting for map...)"
+            end
         end
     end
 end)
