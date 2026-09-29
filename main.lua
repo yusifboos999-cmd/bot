@@ -3,11 +3,10 @@ local runService = game:GetService("RunService")
 
 -- إعدادات السكربت
 local autoStealEnabled = false
-local mapRestockTime = 60 -- الوقت الافتراضي (سيقوم السكربت بتعديله تلقائياً ليطابق الماب)
-local timeRemaining = 0
-local lastEggCount = 0
+local mapRestockTime = 60 -- الوقت الافتراضي للرسباون
+local timeRemaining = 60  -- سيبدأ العد فوراً من 60
+local lastRestockTick = tick()
 
--- ترتيب الندرات المستهدفة وقيمتها لسرقة الأغلى أولاً
 local targetRarities = {
     {name = "divine", value = 3},
     {name = "secret", value = 2},
@@ -27,7 +26,7 @@ MainFrame.Position = UDim2.new(0.5, -130, 0.2, 0)
 MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
-MainFrame.Draggable = true -- سحب القائمة في الجوال
+MainFrame.Draggable = true 
 MainFrame.Parent = ScreenGui
 
 local Title = Instance.new("TextLabel")
@@ -39,23 +38,21 @@ Title.TextSize = 18
 Title.Font = Enum.Font.SourceSansBold
 Title.Parent = MainFrame
 
--- مؤقت الماب
 local TimerLabel = Instance.new("TextLabel")
 TimerLabel.Size = UDim2.new(1, -20, 0, 30)
 TimerLabel.Position = UDim2.new(0, 10, 0, 50)
 TimerLabel.BackgroundTransparency = 1
-TimerLabel.Text = "Syncing with Map..."
+TimerLabel.Text = "Map Timer: 60s"
 TimerLabel.TextColor3 = Color3.fromRGB(255, 200, 50)
 TimerLabel.TextSize = 16
 TimerLabel.Font = Enum.Font.SourceSansBold
 TimerLabel.Parent = MainFrame
 
--- حالة الرسباون (هل رسبن شيء أم لا؟)
 local StatusLabel = Instance.new("TextLabel")
 StatusLabel.Size = UDim2.new(1, -20, 0, 30)
 StatusLabel.Position = UDim2.new(0, 10, 0, 85)
 StatusLabel.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-StatusLabel.Text = "Waiting for restock..."
+StatusLabel.Text = "Active..."
 StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
 StatusLabel.TextSize = 16
 StatusLabel.Font = Enum.Font.SourceSansSemibold
@@ -74,19 +71,6 @@ ToggleBtn.Parent = MainFrame
 -- ==========================================
 -- 2. دوال الفحص والسرقة
 -- ==========================================
-
--- دالة لمعرفة إجمالي عدد البيض حالياً في الماب
-local function getTotalEggs()
-    local count = 0
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") and obj:FindFirstChild("TouchInterest") then
-            count = count + 1
-        end
-    end
-    return count
-end
-
--- دالة النقل الفوري والسرقة
 local function teleportAndSteal(targetEgg)
     local rootPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
     if targetEgg and rootPart then
@@ -99,52 +83,30 @@ local function teleportAndSteal(targetEgg)
     end
 end
 
--- دالة البحث عن البيض النادر عند حدوث الريسباون
-local function snipeRareEggs()
-    local rareEggsFound = {}
+local function checkAndSnipe(obj)
+    if not autoStealEnabled then return end
+    if not (obj:IsA("BasePart") or obj:IsA("Model")) then return end
     
-    -- البحث في الماب
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if obj:IsA("BasePart") and obj:FindFirstChild("TouchInterest") then
-            local eggName = string.lower(obj.Name)
-            for _, rarity in ipairs(targetRarities) do
-                if string.find(eggName, rarity.name) then
-                    table.insert(rareEggsFound, {instance = obj, priority = rarity.value, name = obj.Name})
-                    break
-                end
-            end
+    local eggName = string.lower(obj.Name)
+    local isRare = false
+    
+    for _, rarity in ipairs(targetRarities) do
+        if string.find(eggName, rarity.name) then
+            isRare = true
+            break
         end
     end
     
-    -- إذا لم يرسبن شيء من الندرات المطلوبة
-    if #rareEggsFound == 0 then
-        StatusLabel.Text = "لم يرسبن أي شيء!"
-        StatusLabel.TextColor3 = Color3.fromRGB(255, 80, 80) -- لون أحمر
-        return
-    end
-    
-    -- إذا وجد بيض نادر، يرتبه لسرقة الأغلى أولاً (Divine > Secret > Eternal)
-    table.sort(rareEggsFound, function(a, b)
-        return a.priority > b.priority
-    end)
-    
-    StatusLabel.Text = "تم إيجاد بيض نادر! جاري السرقة..."
-    StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80) -- لون أخضر
-    
-    -- سرقة البيض بالترتيب
-    for _, eggData in ipairs(rareEggsFound) do
-        if eggData.instance and eggData.instance.Parent ~= nil then
-            teleportAndSteal(eggData.instance)
-            task.wait(0.1) -- فاصل بسيط جداً لتجنب اللاق
-        end
+    if isRare then
+        StatusLabel.Text = "Sniping: " .. obj.Name
+        StatusLabel.TextColor3 = Color3.fromRGB(80, 255, 80)
+        teleportAndSteal(obj:IsA("Model") and obj.PrimaryPart or obj)
     end
 end
 
 -- ==========================================
 -- 3. نظام التوقيت المتزامن (Auto-Sync)
 -- ==========================================
-
--- زر التفعيل
 ToggleBtn.MouseButton1Click:Connect(function()
     autoStealEnabled = not autoStealEnabled
     if autoStealEnabled then
@@ -153,48 +115,38 @@ ToggleBtn.MouseButton1Click:Connect(function()
     else
         ToggleBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
         ToggleBtn.Text = "Snipe on Restock: OFF"
-        StatusLabel.Text = "Waiting..."
+        StatusLabel.Text = "Active..."
         StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
     end
 end)
 
--- حلقة المراقبة (تعمل كل ثانية)
-local lastRestockTick = tick()
-
-task.spawn(function()
-    lastEggCount = getTotalEggs()
+-- مراقبة الماب فوراً بدون لوب ثقيل
+workspace.DescendantAdded:Connect(function(obj)
+    task.wait(0.1) -- انتظار تحميل المجسم
+    local objName = string.lower(obj.Name)
     
-    while task.wait(1) do
-        local currentEggs = getTotalEggs()
-        
-        -- إذا زاد عدد البيض فجأة بأكثر من 5 بيضات، هذا يعني أن الماب عمل (Restock)
-        if currentEggs > lastEggCount + 5 then
-            -- حساب الوقت بين آخر ريسباون وهذا الريسباون لضبط توقيت الماب بدقة
-            local newInterval = math.floor(tick() - lastRestockTick)
-            if newInterval > 10 then -- لضمان عدم حدوث خطأ
-                mapRestockTime = newInterval
-            end
-            
-            lastRestockTick = tick()
-            timeRemaining = mapRestockTime
-            
-            -- فحص وسرقة البيض النادر إذا كان الزر مفعلاً
-            if autoStealEnabled then
-                snipeRareEggs()
-            else
-                StatusLabel.Text = "Restock Detected!"
-                StatusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-            end
+    -- إذا ظهرت بيضة جديدة، نقوم بتحديث المؤقت
+    if string.find(objName, "egg") or obj:FindFirstChild("TouchInterest") then
+        local newInterval = math.floor(tick() - lastRestockTick)
+        if newInterval > 10 then 
+            mapRestockTime = newInterval
         end
         
-        lastEggCount = currentEggs
+        lastRestockTick = tick()
+        timeRemaining = mapRestockTime
+        StatusLabel.Text = "Restock Detected!"
         
-        -- تحديث المؤقت الظاهر على الشاشة
+        checkAndSnipe(obj)
+    end
+end)
+
+-- تشغيل المؤقت الظاهر على الشاشة
+task.spawn(function()
+    while task.wait(1) do
         if timeRemaining > 0 then
             timeRemaining = timeRemaining - 1
             TimerLabel.Text = "Map Timer: " .. timeRemaining .. "s"
         else
-            -- إذا انتهى الوقت ولم يرسبن (يحدث إذا تأخر الماب ثانية أو ثانيتين)
             TimerLabel.Text = "Map Timer: 0s (Waiting...)"
         end
     end
